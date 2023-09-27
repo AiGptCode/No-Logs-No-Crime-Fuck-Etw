@@ -1,5 +1,3 @@
-thanks to https://github.com/unkvolism/Fuck-Etw
-
 # 「⚙️」python version Bypass ETW & Ntdll Unhooking
 Bypass the Event Trace Windows(ETW) and unhook ntdll.
 
@@ -41,3 +39,5 @@ Bypass the Event Trace Windows(ETW) and unhook ntdll.
 8. Displays the current process ID and waits for user input.
 9. Calls the `FuckEtw` function to patch the ETW.
 10. Displays a message indicating that the ETW has been patched.
+
+Thanks to https://github.com/unkvolism/Fuck-Etw
