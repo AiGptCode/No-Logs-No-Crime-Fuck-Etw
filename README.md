@@ -40,4 +40,4 @@ Bypass the Event Trace Windows(ETW) and unhook ntdll.
 9. Calls the `FuckEtw` function to patch the ETW.
 10. Displays a message indicating that the ETW has been patched.
 
-Thanks to https://github.com/unkvolism/Fuck-Etw
+
