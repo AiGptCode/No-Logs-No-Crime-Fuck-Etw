@@ -64,7 +64,7 @@ ctypes.windll.kernel32.UnmapViewOfFile(mapped_file)
 ctypes.windll.kernel32.CloseHandle(file_mapping)
 ctypes.windll.kernel32.CloseHandle(ntdll_handle)
 
-# Step 8: Display the current process ID and wait for user input
+# Step 8: Display the current process ID and wait for user input 
 process_id = ctypes.windll.kernel32.GetCurrentProcessId()
 print("Current Process ID:", process_id)
 input("Press Enter to continue...")
