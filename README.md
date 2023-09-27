@@ -11,7 +11,7 @@ Bypass the Event Trace Windows(ETW) and unhook ntdll.
         | )      | (___) || (____/\|  /  \ \| (____/\   | |   | () () |
         |/       (_______)(_______/|_/    \/(_______/   )_(   (_______)
 
-                                [Made by sorahed]
+                                
                                         [v1.0]
 
 
