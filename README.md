@@ -1,4 +1,6 @@
-# 「⚙️」Bypass ETW & Ntdll Unhooking
+thanks to https://github.com/unkvolism/Fuck-Etw
+
+# 「⚙️」python version Bypass ETW & Ntdll Unhooking
 Bypass the Event Trace Windows(ETW) and unhook ntdll.
 
 ```
